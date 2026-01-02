@@ -11,6 +11,7 @@ g1 X10 Y10 S100
 G1 X0 Y10 S50
 G0 X0 Y0`);
 
+const theme = ref('dark');
 const fileInput = ref(null);
 
 const handleFileUpload = (event) => {
@@ -44,6 +45,10 @@ G0 Z5
 G1 X5 Y5 Z5 S75
 G1 X5 Y5 Z10 S100`;
 };
+
+const toggleTheme = () => {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark';
+};
 </script>
 
 <template>
@@ -55,6 +60,11 @@ G1 X5 Y5 Z10 S100`;
       </div>
       
       <div class="header-actions">
+        <button @click="toggleTheme" class="action-btn theme-btn" :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+          <span v-if="theme === 'dark'">☀️</span>
+          <span v-else>🌙</span>
+          {{ theme === 'dark' ? 'Light' : 'Dark' }}
+        </button>
         <button @click="triggerFileInput" class="action-btn load-btn">
           📁 Load File
         </button>
@@ -86,6 +96,7 @@ G1 X5 Y5 Z10 S100`;
     <GcodeViewer 
       v-model:gcode="gcode" 
       :tessellation="0.05"
+      :theme="theme"
       class="viewer-container"
     />
   </div>
@@ -175,6 +186,17 @@ body {
   background: #f0f0f0;
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.theme-btn {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.theme-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
 }
 
 .example-btn {

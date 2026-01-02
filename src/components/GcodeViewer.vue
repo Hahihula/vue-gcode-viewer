@@ -41,7 +41,8 @@ import { useGcodeParser } from '../composables/useGcodeParser';
 // Props
 const props = defineProps({
   gcode: { type: String, default: '' },
-  tessellation: { type: Number, default: 0.05 }
+  tessellation: { type: Number, default: 0.05 },
+  theme: { type: String, default: 'dark', validator: (value) => ['light', 'dark'].includes(value) }
 });
 
 const emit = defineEmits(['update:gcode']);
@@ -62,6 +63,20 @@ const lastRenderedChecksum = ref(0); // Track checksum of last rendered gcode
 
 // --- Parser ---
 const { processGcode, vertices } = useGcodeParser();
+
+// --- Theme Colors ---
+const themeColors = computed(() => ({
+  background: props.theme === 'dark' ? '#1e1e1e' : '#ffffff',
+  toolbar: props.theme === 'dark' ? '#2d2d2d' : '#f0f0f0',
+  toolbarText: props.theme === 'dark' ? '#ffffff' : '#333333',
+  button: props.theme === 'dark' ? '#444444' : '#e0e0e0',
+  buttonHover: props.theme === 'dark' ? '#555555' : '#d0d0d0',
+  border: props.theme === 'dark' ? '#444444' : '#cccccc',
+  canvas: props.theme === 'dark' ? '#111111' : '#fafafa',
+  editorBg: props.theme === 'dark' ? '#1e1e1e' : '#ffffff',
+  activeLine: props.theme === 'dark' ? '#4444ff33' : '#4444ff22',
+  errorLine: props.theme === 'dark' ? '#ff000033' : '#ff000022'
+}));
 
 // --- Simple Checksum Function ---
 const calculateChecksum = (str) => {
@@ -125,6 +140,42 @@ watch(() => props.gcode, (newGcode) => {
   }
 });
 
+// --- Watch for theme changes ---
+watch(() => props.theme, (newTheme) => {
+  if (scene) {
+    scene.background = new THREE.Color(newTheme === 'dark' ? 0x1e1e1e : 0xf5f5f5);
+    
+    // Update grid colors
+    scene.children.forEach(child => {
+      if (child.type === 'GridHelper') {
+        scene.remove(child);
+        const gridHelper = new THREE.GridHelper(200, 20,
+          newTheme === 'dark' ? 0x444444 : 0x888888,
+          newTheme === 'dark' ? 0x222222 : 0xcccccc
+        );
+        gridHelper.rotation.x = Math.PI / 2;
+        scene.add(gridHelper);
+      }
+    });
+  }
+  
+  // Recreate editor with new theme
+  if (cmView) {
+    const currentContent = cmView.state.doc.toString();
+    cmView.destroy();
+    initEditor();
+    if (currentContent !== props.gcode) {
+      cmView.dispatch({
+        changes: {
+          from: 0,
+          to: cmView.state.doc.length,
+          insert: currentContent
+        }
+      });
+    }
+  }
+});
+
 // --- Initialization ---
 onMounted(() => {
   initThree();
@@ -177,11 +228,24 @@ const initEditor = () => {
       basicSetup,
       createHighlightPlugin(parseErrors.value), 
       EditorView.theme({
-        "&": { height: "100%" },
-        ".active-line": { backgroundColor: "#4444ff33" }, 
-        ".error-line": { backgroundColor: "#ff000033" },   
+        "&": { 
+          height: "100%",
+          backgroundColor: themeColors.value.editorBg,
+          color: themeColors.value.toolbarText
+        },
+        ".cm-content": {
+          backgroundColor: themeColors.value.editorBg,
+          color: themeColors.value.toolbarText
+        },
+        ".cm-gutters": {
+          backgroundColor: props.theme === 'dark' ? '#252525' : '#f5f5f5',
+          color: props.theme === 'dark' ? '#888888' : '#666666',
+          border: 'none'
+        },
+        ".active-line": { backgroundColor: themeColors.value.activeLine }, 
+        ".error-line": { backgroundColor: themeColors.value.errorLine },   
         ".cm-line": { textAlign: "left", cursor: "pointer" }
-      }),
+      }, { dark: props.theme === 'dark' }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const newGcode = update.state.doc.toString();
@@ -214,10 +278,13 @@ const initEditor = () => {
 // --- Three.js Setup ---
 const initThree = () => {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1e1e1e);
+  scene.background = new THREE.Color(props.theme === 'dark' ? 0x1e1e1e : 0xf5f5f5);
 
   // Grid (rotated so Z is up instead of Y)
-  const gridHelper = new THREE.GridHelper(200, 20);
+  const gridHelper = new THREE.GridHelper(200, 20, 
+    props.theme === 'dark' ? 0x444444 : 0x888888,
+    props.theme === 'dark' ? 0x222222 : 0xcccccc
+  );
   gridHelper.rotation.x = Math.PI / 2; // Rotate 90 degrees to make Z-axis vertical
   scene.add(gridHelper);
 
@@ -536,16 +603,18 @@ const onWindowResize = () => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  border: 1px solid #444;
+  border: 1px solid v-bind('themeColors.border');
+  background: v-bind('themeColors.background');
 }
 .toolbar {
   height: 40px;
-  background: #2d2d2d;
+  background: v-bind('themeColors.toolbar');
   display: flex;
   align-items: center;
   padding: 0 10px;
   gap: 10px;
-  color: white;
+  color: v-bind('themeColors.toolbarText');
+  border-bottom: 1px solid v-bind('themeColors.border');
 }
 .content {
   display: flex;
@@ -554,30 +623,34 @@ const onWindowResize = () => {
 }
 .canvas-container {
   flex: 1;
-  background: #111;
+  background: v-bind('themeColors.canvas');
   overflow: hidden;
   position: relative;
 }
 .sidebar {
   width: 400px;
-  border-left: 1px solid #444;
+  border-right: 1px solid v-bind('themeColors.border');
   display: flex;
   flex-direction: column;
+  background: v-bind('themeColors.editorBg');
 }
 .editor-container {
   flex: 1;
   overflow: auto;
 }
 button {
-  background: #444;
-  color: white;
+  background: v-bind('themeColors.button');
+  color: v-bind('themeColors.toolbarText');
   border: none;
   padding: 4px 10px;
   cursor: pointer;
 }
-button:hover { background: #555; }
+button:hover { 
+  background: v-bind('themeColors.buttonHover');
+}
 .reload-button {
   background: #ff6b35;
+  color: white;
   font-weight: bold;
 }
 .reload-button:hover {
