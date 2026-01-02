@@ -1,0 +1,40 @@
+# Source files (only dist should be published)
+src/
+public/
+
+# Development files
+*.log
+.DS_Store
+node_modules/
+dist-demo/
+
+# Git files
+.git/
+.gitignore
+
+# CI/CD
+.gitlab-ci.yml
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation (README and LICENSE should be included)
+CONTRIBUTING.md
+
+# Config files
+vite.config.js
+.eslintrc.cjs
+.prettierrc
+
+# Test files
+tests/
+*.spec.js
+*.test.js
+
+# Other
+.npmignore

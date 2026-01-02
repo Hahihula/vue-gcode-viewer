@@ -1,7 +1,8 @@
 {
-  "name": "vue-gcode-viewer",
+  "name": "vue-gcode-viewer",  
   "private": false,
   "version": "0.1.0",
+  "description": "Interactive 3D G-Code viewer and editor for Vue 3 with real-time visualization",
   "type": "module",
   "files": [
     "dist"
@@ -39,5 +40,30 @@
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.2.5"
-  }
+  },
+  "keywords": [
+    "vue",
+    "vue3",
+    "gcode",
+    "cnc",
+    "3d-printing",
+    "viewer",
+    "visualizer",
+    "threejs",
+    "codemirror",
+    "3d",
+    "manufacturing",
+    "toolpath",
+    "machining"
+  ],
+  "author": "hahihula",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/hahihula/vue-gcode-viewer.git"
+  },
+  "bugs": {
+    "url": "https://gitlab.com/hahihula/vue-gcode-viewer/-/issues"
+  },
+  "homepage": "https://hahihula.gitlab.io/vue-gcode-viewer"
 }
