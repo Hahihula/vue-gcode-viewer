@@ -54,9 +54,12 @@ const playbackSpeed = ref(1.0);
 const isPlaying = ref(false);
 const currentSegmentIndex = ref(0);
 const simTime = ref(0); // Tracks current time in seconds
+const parseErrors = ref([]); 
+
 
 // --- Parser ---
 const { processGcode, vertices } = useGcodeParser();
+
 
 // --- Three.js Globals ---
 let scene, camera, renderer, lineMesh, headGroup;
@@ -103,22 +106,54 @@ onBeforeUnmount(() => {
   if (renderer) renderer.dispose();
 });
 
+const createHighlightPlugin = (errorList) => {
+  return ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.decorations = this.getDecorations(view);
+    }
+    update(update) {
+      this.decorations = this.getDecorations(update.view);
+    }
+    getDecorations(view) {
+      const decorations = [];
+      
+      // 1. Active Line (Simulation)
+      const currentVert = vertices.value[currentSegmentIndex.value];
+      if (currentVert) {
+          decorations.push(activeLineMark.range(view.state.doc.line(currentVert.lineIndex + 1).from));
+      }
+
+      // 2. Error Lines (Parser)
+      errorList.forEach(err => {
+          // err.lineIndex is 0-based from parser. CodeMirror lines are 1-based in .line()
+          decorations.push(errorLineMark.range(view.state.doc.line(err.lineIndex + 1).from));
+      });
+
+      return Decoration.set(decorations);
+    }
+  }, { decorations: v => v.decorations });
+};
+
 // --- Editor Setup ---
 const initEditor = () => {
   const startState = EditorState.create({
     doc: props.gcode,
     extensions: [
       basicSetup,
-      syncHighlightPlugin,
+      // Pass the reactive errors ref (or watch it, but for simple MVP pass current value)
+      // Note: To make it reactive, we should probably use a transaction dispatcher, 
+      // but triggering a re-render of the plugin is easier via dispatch({}) in renderGcode.
+      createHighlightPlugin(parseErrors.value), 
       EditorView.theme({
         "&": { height: "100%" },
-        ".active-line": { backgroundColor: "#4444ff33" }, // Transparent Blue
-        ".error-line": { backgroundColor: "#ff000033" }   // Transparent Red
+        ".active-line": { backgroundColor: "#4444ff33" }, 
+        ".error-line": { backgroundColor: "#ff000033" },   
+        ".cm-line": { textAlign: "left" }
       }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           emit('update:gcode', update.state.doc.toString());
-          renderGcode(); // Re-parses 3D on text change
+          renderGcode(); // Re-parses
         }
       })
     ]
@@ -173,7 +208,18 @@ const renderGcode = () => {
   if (!scene) return;
 
   // 1. Parse
-  processGcode(props.gcode, props.tessellation);
+  const result = processGcode(props.gcode, props.tessellation);
+  parseErrors.value = result.errors;
+
+  if (cmView) {
+    // We need to dispatch a dummy transaction or reconfigure the plugin.
+    // The simplest way is reconfiguring the highlight plugin with the new errors.
+    // However, since we passed parseErrors.value by value to the class constructor,
+    // the class won't see updates unless we access the ref directly.
+    
+    // Easier Fix: Just dispatch a transaction to force the plugin to run its 'getDecorations' method again.
+    cmView.dispatch({}); 
+  }
 
   // 2. Clear old lines
   if (lineMesh) {
@@ -183,20 +229,24 @@ const renderGcode = () => {
   }
 
   // 3. Build Geometry
-  const points = [];
+  const positions = [];
   const colors = [];
   
   vertices.value.forEach(v => {
-    points.push(v.start.x, v.start.y, v.start.z);
-    points.push(v.end.x, v.end.y, v.end.z);
+    // Positions
+    positions.push(v.start.x, v.start.y, v.start.z);
+    positions.push(v.end.x, v.end.y, v.end.z);
+    // Helper to ensure we have a THREE.Color object (handles Hex Integers, Strings, or existing Objects)
+    const cStart = new THREE.Color(v.startColor); 
+    const cEnd = new THREE.Color(v.endColor);
 
-    // Colors
-    colors.push(v.color.r, v.color.g, v.color.b);
-    colors.push(v.color.r, v.color.g, v.color.b);
+    // Push the normalized float values (0.0 to 1.0)
+    colors.push(cStart.r, cStart.g, cStart.b);
+    colors.push(cEnd.r, cEnd.g, cEnd.b);
   });
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
   const material = new THREE.LineBasicMaterial({ vertexColors: true });
@@ -458,4 +508,7 @@ button {
 button:hover { background: #555; }
 .controls { display: flex; gap: 5px; }
 .speed-control { margin-left: auto; display: flex; gap: 5px; align-items: center; }
+.editor-container .cm-line{
+  text-align: left;
+}
 </style>

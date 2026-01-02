@@ -19,6 +19,18 @@ export function useGcodeParser() {
     return data;
   };
 
+  // Helper: Generate color based on Laser Intensity (S)
+  // Returns a THREE.Color
+  const getLaserColor = (sVal) => {
+    // Assume max S is 1000 or 255. Normalize 0 to 1.
+    const intensity = Math.min(Math.max(sVal / 1000, 0), 1);
+    // Base Red (0.5, 0, 0) -> Bright Red (1, 0, 0)
+    const r = 0.5 + (0.5 * intensity);
+    const g = 0;
+    const b = 0;
+    return new THREE.Color(r, g, b);
+  };
+
   const processGcode = (gcode, tessellation = 0.05) => {
     const lines = gcode.split('\n');
     const newVertices = [];
@@ -43,6 +55,7 @@ export function useGcodeParser() {
 
       const cmd = parseLine(cleanLine);
 
+
       // Helper to calculate 3D distance
       const getDistance = (p1, p2) => {
         return Math.sqrt(
@@ -61,22 +74,31 @@ export function useGcodeParser() {
       };
       
       // Handle Errors (Unknown commands)
-      // In a real app, we would check strict GRBL/Marlin cmd lists. 
-      // Here we just catch logic errors.
-      
-      // State Changes
-      if (cmd.G) {
-        if ([0, 1, 2, 3].includes(cmd.G)) currentModal.motion = `G${cmd.G}`;
-        if (cmd.G === 20) currentModal.units = 'G20'; // Inches
-        if (cmd.G === 21) currentModal.units = 'G21'; // MM
-        if (cmd.G === 90) pos.absolute = true; // Absolute (Simplification: logic below assumes abs)
-        if (cmd.G === 91) pos.absolute = false; 
+      // --- Error Detection ---
+      let lineHasError = false;
+      let errorMsg = "";
+
+       // Check for G-Code commands without parameters (basic check)
+      if ((cmd.G === 0 || cmd.G === 1 || cmd.G === 2 || cmd.G === 3) && 
+          cmd.X === undefined && cmd.Y === undefined && cmd.Z === undefined && 
+          cmd.I === undefined && cmd.J === undefined) {
+         // It's a move command but nowhere to go.
+         // Depending on strictness, this might be an error or just ignored.
+         // We will ignore it for now, but log it if it's an Arc without radius.
+      }
+
+      // Arc validation (must have I/J or R)
+      if ((cmd.G === 2 || cmd.G === 3) && cmd.I === undefined && cmd.J === undefined && cmd.R === undefined) {
+          lineHasError = true;
+          errorMsg = "Arc move missing I, J, or R parameters";
       }
       
+      // State Changes
+      // Update State
+      if (cmd.G) currentModal.motion = `G${cmd.G}`;
       if (cmd.F) pos.f = cmd.F;
       if (cmd.S) pos.s = cmd.S;
 
-      // G92: Set Position Offset
       if (cmd.G === 92) {
         if (cmd.X !== undefined) offset.x = pos.x - cmd.X;
         if (cmd.Y !== undefined) offset.y = pos.y - cmd.Y;
@@ -84,11 +106,60 @@ export function useGcodeParser() {
         return;
       }
 
-      // Calculate Target (Logical)
-      // Note: Simplified to Absolute positioning for MVP. TODO: Add Relative logic if needed.
+      // Calculate Targets
       let targetX = (cmd.X !== undefined) ? cmd.X + offset.x : pos.x;
       let targetY = (cmd.Y !== undefined) ? cmd.Y + offset.y : pos.y;
       let targetZ = (cmd.Z !== undefined) ? cmd.Z + offset.z : pos.z;
+
+      // --- Calculate Duration & Distances ---
+      const dist = Math.sqrt(
+        Math.pow(targetX - pos.x, 2) + 
+        Math.pow(targetY - pos.y, 2) + 
+        Math.pow(targetZ - pos.z, 2)
+      );
+      
+      const isRapid = currentModal.motion === 'G0';
+      const feed = isRapid ? 5000 : (pos.f > 0 ? pos.f : 1500);
+      const duration = dist > 0 ? (dist / feed) * 60 : 0;
+
+      // --- Determine Colors (Gradient Logic) ---
+      // We calculate color at START and END of segment
+      let startColor, endColor;
+
+      if (isRapid) {
+          startColor = colors.travel;
+          endColor = colors.travel;
+      } else if (pos.s > 0 || (cmd.S !== undefined && cmd.S > 0)) {
+          // LASER LOGIC
+          const startS = pos.s;
+          const endS = (cmd.S !== undefined) ? cmd.S : pos.s;
+          startColor = getLaserColor(startS);
+          endColor = getLaserColor(endS);
+      } else {
+          // CUT/EXTRUDE LOGIC
+          startColor = colors.cut;
+          endColor = colors.cut;
+      }
+
+      // Push Vertex
+      if (!lineHasError) {
+          newVertices.push({
+              start: { x: pos.x, y: pos.y, z: pos.z },
+              end: { x: targetX, y: targetY, z: targetZ },
+              startColor: startColor,
+              endColor: endColor,
+              distance: dist,
+              duration: duration,
+              lineIndex: index
+          });
+      } else {
+          // Push error
+          newErrors.push({ lineIndex: index, message: errorMsg });
+      }
+      // Update current Position
+      pos.x = targetX; 
+      pos.y = targetY; 
+      pos.z = targetZ;
 
       // Generate Vertices
       if (currentModal.motion === 'G0') {

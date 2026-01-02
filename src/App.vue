@@ -3,18 +3,12 @@ import { ref } from 'vue';
 import GcodeViewer from './components/GcodeViewer.vue';
 
 const gcode = ref(`; Simple Demo
-G21 ; Set to mm
-G90 ; Absolute positioning
-G0 X0 Y0 Z5
-G1 Z0 F1000
-; Draw a square
-G1 X10 Y10 S500
-G1 X20 Y10 S1000
-G1 X20 Y20
-G1 X10 Y20
-G1 X10 Y10
-; Lift and move home
-G0 Z5
+G90 ; Absolute coordinates
+G21 ; Dimensions in mm
+G1 X0 S0
+G1 X10 S100
+g1 X10 Y10 S100
+G1 X0 Y10 S50
 G0 X0 Y0`);
 </script>
 
