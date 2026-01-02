@@ -3,6 +3,7 @@
     <!-- Toolbar -->
     <div class="toolbar">
       <button @click="toggleSidebar">{{ showSidebar ? 'Hide Editor' : 'Show Editor' }}</button>
+      <button v-if="needsReload" @click="reloadView" class="reload-button">🔄 Reload View</button>
       <div class="controls">
         <button @click="stop">⏹</button>
         <button @click="prevStep">⏮</button>
@@ -54,11 +55,24 @@ const playbackSpeed = ref(1.0);
 const isPlaying = ref(false);
 const currentSegmentIndex = ref(0);
 const simTime = ref(0); // Tracks current time in seconds
-const parseErrors = ref([]); 
+const parseErrors = ref([]);
+const needsReload = ref(false); // Track if gcode changed
+const lastRenderedChecksum = ref(0); // Track checksum of last rendered gcode
 
 
 // --- Parser ---
 const { processGcode, vertices } = useGcodeParser();
+
+// --- Simple Checksum Function ---
+const calculateChecksum = (str) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return hash;
+};
 
 
 // --- Three.js Globals ---
@@ -91,12 +105,33 @@ const syncHighlightPlugin = ViewPlugin.fromClass(class {
   }
 }, { decorations: v => v.decorations });
 
+// --- Watch for external gcode changes ---
+watch(() => props.gcode, (newGcode) => {
+  if (cmView && cmView.state.doc.toString() !== newGcode) {
+    // Update editor content
+    cmView.dispatch({
+      changes: {
+        from: 0,
+        to: cmView.state.doc.length,
+        insert: newGcode
+      }
+    });
+    
+    // Mark as needing reload
+    const newChecksum = calculateChecksum(newGcode);
+    if (newChecksum !== lastRenderedChecksum.value) {
+      needsReload.value = true;
+    }
+  }
+});
+
 // --- Initialization ---
 onMounted(() => {
   initThree();
   initEditor();
   window.addEventListener('resize', onWindowResize);
   renderGcode(); // Initial render
+  lastRenderedChecksum.value = calculateChecksum(props.gcode);
 });
 
 onBeforeUnmount(() => {
@@ -140,20 +175,35 @@ const initEditor = () => {
     doc: props.gcode,
     extensions: [
       basicSetup,
-      // Pass the reactive errors ref (or watch it, but for simple MVP pass current value)
-      // Note: To make it reactive, we should probably use a transaction dispatcher, 
-      // but triggering a re-render of the plugin is easier via dispatch({}) in renderGcode.
       createHighlightPlugin(parseErrors.value), 
       EditorView.theme({
         "&": { height: "100%" },
         ".active-line": { backgroundColor: "#4444ff33" }, 
         ".error-line": { backgroundColor: "#ff000033" },   
-        ".cm-line": { textAlign: "left" }
+        ".cm-line": { textAlign: "left", cursor: "pointer" }
       }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
-          emit('update:gcode', update.state.doc.toString());
-          renderGcode(); // Re-parses
+          const newGcode = update.state.doc.toString();
+          emit('update:gcode', newGcode);
+          
+          // Check if gcode changed from last rendered version using checksum
+          const newChecksum = calculateChecksum(newGcode);
+          if (newChecksum !== lastRenderedChecksum.value) {
+            needsReload.value = true;
+          }
+        }
+      }),
+      // Add click handler for lines
+      EditorView.domEventHandlers({
+        click: (event, view) => {
+          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+          if (pos !== null) {
+            const line = view.state.doc.lineAt(pos);
+            const lineNumber = line.number - 1; // Convert to 0-based
+            jumpToLine(lineNumber);
+          }
+          return false;
         }
       })
     ]
@@ -212,12 +262,6 @@ const renderGcode = () => {
   parseErrors.value = result.errors;
 
   if (cmView) {
-    // We need to dispatch a dummy transaction or reconfigure the plugin.
-    // The simplest way is reconfiguring the highlight plugin with the new errors.
-    // However, since we passed parseErrors.value by value to the class constructor,
-    // the class won't see updates unless we access the ref directly.
-    
-    // Easier Fix: Just dispatch a transaction to force the plugin to run its 'getDecorations' method again.
     cmView.dispatch({}); 
   }
 
@@ -263,6 +307,49 @@ const renderGcode = () => {
   const distance = radius * 2.5;
   camera.position.set(center.x + distance, center.y - distance, center.z + distance);
   camera.lookAt(center);
+  
+  // 6. Update state
+  lastRenderedChecksum.value = calculateChecksum(props.gcode);
+  needsReload.value = false;
+};
+
+// --- Reload View Handler ---
+const reloadView = () => {
+  // Stop playback
+  isPlaying.value = false;
+  cancelAnimationFrame(animationId);
+  
+  // Reset simulation
+  simTime.value = 0;
+  currentSegmentIndex.value = 0;
+  
+  // Re-render
+  renderGcode();
+  
+  // Update editor highlighting
+  if (cmView) cmView.dispatch({});
+};
+
+// --- Jump to Line Handler ---
+const jumpToLine = (lineNumber) => {
+  // Find the vertex that corresponds to this line
+  const vertexIndex = vertices.value.findIndex(v => v.lineIndex === lineNumber);
+  
+  if (vertexIndex !== -1) {
+    // Stop playback if running
+    isPlaying.value = false;
+    cancelAnimationFrame(animationId);
+    
+    // Jump to that vertex
+    currentSegmentIndex.value = vertexIndex;
+    simTime.value = vertices.value[vertexIndex].startTime;
+    
+    // Update head position
+    updateHeadPositionAtTime(simTime.value);
+    
+    // Update editor highlighting
+    if (cmView) cmView.dispatch({});
+  }
 };
 
 // --- Simulation Logic ---
@@ -363,16 +450,6 @@ const updateHeadPositionAtTime = (time) => {
     }
 
     headGroup.position.set(currentX, currentY, currentZ);
-    
-    // Orientation: Look ahead slightly to point in direction of travel
-    // We create a temporary target point slightly ahead in the segment
-    // const lookAheadX = v.start.x + (v.end.x - v.start.x) * Math.min(t + 0.01, 1.0);
-    // const lookAheadY = v.start.y + (v.end.y - v.start.y) * Math.min(t + 0.01, 1.0);
-    // const lookAheadZ = v.start.z + (v.end.z - v.start.z) * Math.min(t + 0.01, 1.0);
-    
-    // headGroup.lookAt(lookAheadX, lookAheadY, lookAheadZ);
-     headGroup.position.set(currentX, currentY, currentZ);
-
 };
 
 
@@ -384,20 +461,13 @@ const updateHeadPosition = (index) => {
       const coneGeo = new THREE.ConeGeometry(1, 4, 16);
       coneGeo.rotateX(3 * Math.PI / 2); // Orient cone along Z (local) which points forward
       coneGeo.translate(0, 0, 2); // Move to center of cone
-      // But wait, we want the cone to point in the direction of travel.
-      // Let's just use a Sphere for simplicity or an ArrowHelper
       const mat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
       headGroup = new THREE.Mesh(coneGeo, mat);
-      scene.add(headGroup); // Add to group
+      scene.add(headGroup);
   }
   
   // Update position
   headGroup.position.set(v.end.x, v.end.y, v.end.z);
-  
-  // Orientation: Look at start point
-  // Since we are inside a rotated group, local coordinates work fine.
-  // const target = new THREE.Vector3(0, 0, 0);
-  // headGroup.lookAt(target);
 };
 
 // --- UI Handlers ---
@@ -506,6 +576,13 @@ button {
   cursor: pointer;
 }
 button:hover { background: #555; }
+.reload-button {
+  background: #ff6b35;
+  font-weight: bold;
+}
+.reload-button:hover {
+  background: #ff8555;
+}
 .controls { display: flex; gap: 5px; }
 .speed-control { margin-left: auto; display: flex; gap: 5px; align-items: center; }
 .editor-container .cm-line{
