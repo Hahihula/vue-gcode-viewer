@@ -1,3 +1,21 @@
+# 🪞 GitHub Mirror
+
+[![GitLab](https://img.shields.io/badge/Primary%20Repo-GitLab-orange?style=for-the-badge&logo=gitlab)](https://gitlab.com/hahihula/vue-gcode-viewer)
+
+> **⚠️ Important Notice**: This repository is a **read-only mirror** of the primary repository hosted on GitLab.
+
+- **Primary Repository**: [https://gitlab.com/hahihula/vue-gcode-viewer](https://gitlab.com/hahihula/vue-gcode-viewer)
+- **Submit Issues**: [GitLab Issues](https://gitlab.com/hahihula/vue-gcode-viewer/-/issues)
+- **Submit PRs**: [GitLab Merge Requests](https://gitlab.com/hahihula/vue-gcode-viewer/-/merge_requests)
+- **Live Demo**: [https://hahihula.gitlab.io/vue-gcode-viewer](https://hahihula.gitlab.io/vue-gcode-viewer)
+- **NPM Package**: [vue-gcode-viewer](https://www.npmjs.com/package/vue-gcode-viewer)
+
+All development, issue tracking, and pull requests should be done on the GitLab repository.
+
+---
+
+# Original README
+
 # Vue G-Code Viewer
 
 [![Live Demo](https://img.shields.io/badge/demo-live-success?style=for-the-badge&logo=gitlab)](https://hahihula.gitlab.io/vue-gcode-viewer)
